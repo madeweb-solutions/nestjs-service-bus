@@ -10,7 +10,7 @@ export class AzureServiceBusModule {
       providers: [
         {
           provide: 'AZURE_SERVICE_BUS_STRATEGY',
-          useValue: new AzureServiceBusStrategy(options),
+          useFactory: () => new AzureServiceBusStrategy(options),
         },
       ],
       exports: ['AZURE_SERVICE_BUS_STRATEGY'],

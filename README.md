@@ -5,7 +5,7 @@
 [circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
 [circleci-url]: https://circleci.com/gh/nestjs/nest
 
-  <p align="center"><a href="https://nestjs.com" target="_blank">NestJs</a> custom transport for <a href="https://docs.microsoft.com/en-us/azure/service-bus-messaging/service-bus-messaging-overview" target="_blank">Azure Service Bus</a>.</p>
+  <p align="center"><a href="https://nestjs.com" target="_blank">NestJS</a> custom transport for <a href="https://docs.microsoft.com/en-us/azure/service-bus-messaging/service-bus-messaging-overview" target="_blank">Azure Service Bus</a>.</p>
     <p align="center">
 <a href="https://www.npmjs.com/~luis199230" target="_blank"><img src="https://img.shields.io/npm/v/@madeweb/nestjs-service-bus.svg" alt="NPM Version" /></a>
 <a href="https://www.npmjs.com/~luis199230" target="_blank"><img src="https://img.shields.io/npm/l/@madeweb/nestjs-service-bus.svg" alt="Package License" /></a>
@@ -14,137 +14,161 @@
 
 ## Description
 
-<a href="https://azure.microsoft.com/en-us/services/service-bus/#overview" target="_blank">Azure Service Bus</a> is a fully managed enterprise message broker with message queues. Service Bus is used to decouple applications and services from each other, providing the following benefits:
+<a href="https://azure.microsoft.com/en-us/services/service-bus/#overview" target="_blank">Azure Service Bus</a> custom transport for NestJS microservices. Supports **queues** and **topics/subscriptions** with proper message routing via NestJS patterns.
 
-- Load-balancing work across competing workers
-- Safely routing and transferring data and control across service and application boundaries
-- Coordinating transactional work that requires a high-degree of reliability
-
-#### Installation
-
-To start building Azure Service Bus-based microservices, first install the required packages:
+### Installation
 
 ```bash
 $ npm i --save @azure/service-bus @madeweb/nestjs-service-bus
 ```
-#### Overview
 
-To use the Azure Service Bus strategy, pass the following options object to the `createMicroservice()` method:
+### Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `connectionString` | `string` | — | Azure Service Bus connection string |
+| `queueName` | `string` | — | Queue name (required when not using topics) |
+| `topicName` | `string` | — | Topic name (required when not using queues) |
+| `subscriptionName` | `string` | — | Subscription name (required with topics) |
+| `receiveMode` | `'peekLock' \| 'receiveAndDelete'` | `'peekLock'` | Message receive mode |
+| `clientOptions` | `ServiceBusClientOptions` | — | Azure SDK client options (retry, webSocket, userAgent) |
+
+#### Client options (`clientOptions`)
+
+Pass advanced options to the underlying `ServiceBusClient`:
 
 ```typescript
-//  main.ts
-
-const app = await NestFactory.createMicroservice<MicroserviceOptions>(AppModule, {
-  strategy: new AzureServiceBusServer({
-    connectionString: 'Endpoint=sb://<Name>.servicebus.windows.net/;SharedAccessKeyName=<SharedAccessKeyName>;SharedAccessKey=<SharedAccessKey>',
-    queueName: 'sample-queue',
-  }),
-});
-
+interface ServiceBusClientOptions {
+  retryOptions?: RetryOptions;
+  webSocketOptions?: WebSocketOptions;
+  userAgentOptions?: UserAgentOptions;
+}
 ```
-#### Options
 
-The <strong>Azure Service Bus</strong> strategy exposes the properties described below.
+## Usage
 
-<table>
-  <tr>
-    <td><code>retryOptions</code></td>
-    <td>Retry policy options that determine the mode, number of retries, retry interval etc (read more <a href="https://docs.microsoft.com/en-us/javascript/api/@azure/service-bus/servicebusclientoptions?view=azure-node-latest#@azure-service-bus-servicebusclientoptions-retryoptions" rel="nofollow" target="_blank">here</a>).</td>
-  </tr>
-  <tr>
-    <td><code>webSocketOptions</code></td>
-    <td>Options to configure the channelling of the AMQP connection over Web Sockets (read more <a href="https://docs.microsoft.com/en-us/javascript/api/@azure/service-bus/servicebusclientoptions?view=azure-node-latest#@azure-service-bus-servicebusclientoptions-websocketoptions" rel="nofollow" target="_blank">here</a>).</td>
-  </tr>
-  <tr>
-    <td><code>userAgentOptions</code></td>
-    <td>Options for adding user agent details to outgoing requests (read more <a href="https://docs.microsoft.com/en-us/javascript/api/@azure/service-bus/servicebusclientoptions?view=azure-node-latest#@azure-service-bus-servicebusclientoptions-useragentoptions" rel="nofollow" target="_blank">here</a>).</td>
-  </tr>
-</table>
-
-
-#### Usage
-
-Add the following code to your main.ts file:
+### Microservice server (consumer)
 
 ```typescript
-async function bootstrapAzureServiceBus(app: INestApplication): Promise<void> {
-  const serviceBusConnection = process.env.AZURE_SERVICE_BUS_CONNECTION;
+// main.ts
+import { NestFactory } from '@nestjs/core';
+import { MicroserviceOptions } from '@nestjs/microservices';
+import { AzureServiceBusStrategy } from '@madeweb/nestjs-service-bus';
+import { AppModule } from './app.module';
 
-  if (serviceBusConnection) {
-    app.connectMicroservice<CustomStrategy>({
-      strategy: new AzureServiceBusStrategy({
-        connectionString: serviceBusConnection,
-        queueName: process.env.AZURE_SERVICE_BUS_DOWNLOAD_QUEUE,
-      }),
-    });
+async function bootstrap() {
+  const app = await NestFactory.createMicroservice<MicroserviceOptions>(AppModule, {
+    strategy: new AzureServiceBusStrategy({
+      connectionString: 'Endpoint=sb://<namespace>.servicebus.windows.net/;SharedAccessKeyName=<key>;SharedAccessKey=<key>',
+      queueName: 'my-queue',
+    }),
+  });
 
-    await app.startAllMicroservices();
+  await app.listen();
+}
+bootstrap();
+```
+
+#### Handling messages
+
+The pattern sent by the client is stored in the message's `applicationProperties` and used to route to the correct handler:
+
+```typescript
+import { Controller } from '@nestjs/common';
+import { MessagePattern, Payload } from '@nestjs/microservices';
+
+@Controller()
+export class MessageController {
+  @MessagePattern('order.created')
+  async handleOrderCreated(@Payload() data: any) {
+    console.log('Order created:', data);
+  }
+
+  @MessagePattern('order.cancelled')
+  async handleOrderCancelled(@Payload() data: any) {
+    console.log('Order cancelled:', data);
   }
 }
 ```
 
-#### Producer
+### Client (producer)
 
 ```typescript
 import { Injectable } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
 import { AzureServiceBusClient } from '@madeweb/nestjs-service-bus';
 import { firstValueFrom } from 'rxjs';
 
 @Injectable()
-export class AnyQueueService {
-  private client: AzureServiceBusClient;
-  private queueName: string;
+export class OrderService {
+  private readonly client: AzureServiceBusClient;
 
-  constructor(private readonly configService: ConfigService) {
-    this.queueName = this.configService.get<string>(
-      'azureServiceBus.queueName',
-    );
-    this.client = new AzureServiceBusClient(
-      this.configService.get('azureServiceBus'),
-    );
+  constructor() {
+    this.client = new AzureServiceBusClient({
+      connectionString: process.env.AZURE_SERVICE_BUS_CONNECTION!,
+      queueName: 'my-queue',
+    });
   }
 
-  public async sendMessage(body: string) {
+  async createOrder(data: any) {
     await this.client.connect();
-    await firstValueFrom(this.client.emit(this.queueName, body));
+    return firstValueFrom(this.client.emit('order.created', data));
   }
 }
-
 ```
 
-##### Consumer
-
-To access the original Azure Service Bus message use the `@MessagePattern` decorator as follows:
-
+### Using Topics / Subscriptions
 
 ```typescript
+// Server
+new AzureServiceBusStrategy({
+  connectionString: process.env.AZURE_SERVICE_BUS_CONNECTION!,
+  topicName: 'orders',
+  subscriptionName: 'service-a',
+  receiveMode: 'peekLock',
+  clientOptions: {
+    retryOptions: { maxRetries: 3 },
+  },
+});
 
- @MessagePattern('{queueNameFromEnv}')
-  async handleMessage(@Payload() data: string) {
-    console.log(`Received message: ${data}`);
-  }
-
+// Client
+new AzureServiceBusClient({
+  connectionString: process.env.AZURE_SERVICE_BUS_CONNECTION!,
+  topicName: 'orders',
+});
 ```
 
-Options
+### Hybrid app (HTTP + microservice)
 
-<table>
-  <tr>
-    <td><code>receiveMode</code></td>
-    <td>Represents the receive mode for the receiver. (read more <a href="https://docs.microsoft.com/azure/service-bus-messaging/message-transfers-locks-settlement#peeklock" rel="nofollow" target="_blank">here</a>).</td>
-  </tr>
-  <tr>
-    <td><code>options</code></td>
-    <td>Options used when subscribing to a Service Bus queue.</td>
-  </tr>
-</table>
+```typescript
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule);
 
+  app.connectMicroservice({
+    strategy: new AzureServiceBusStrategy({
+      connectionString: process.env.AZURE_SERVICE_BUS_CONNECTION!,
+      queueName: process.env.AZURE_SERVICE_BUS_QUEUE!,
+    }),
+  });
 
+  await app.startAllMicroservices();
+  await app.listen(3000);
+}
+```
 
-## Security concerns and contributions
+## Message routing
 
-* Author - [Luis Benavides](https://github.com/luis199230)
+Messages are routed using the `pattern` field stored in the Azure Service Bus message `applicationProperties`. This allows a single queue/topic to handle multiple message patterns with different `@MessagePattern()` handlers — just like NestJS built-in transports (RabbitMQ, Redis, etc.).
+
+## Error handling
+
+- **PeekLock mode**: messages are automatically completed on success and abandoned on error
+- **ReceiveAndDelete mode**: messages are removed from the broker on delivery (no settlement required)
+- Server errors are logged via NestJS `Logger` instead of `console.error`
+
+## Security and contributions
+
+- Author - [Luis Benavides](https://github.com/luis199230)
 
 ## License
-Nestjs Azure Service Bus is [MIT licensed](LICENSE).
+
+NestJS Azure Service Bus is [MIT licensed](LICENSE).
